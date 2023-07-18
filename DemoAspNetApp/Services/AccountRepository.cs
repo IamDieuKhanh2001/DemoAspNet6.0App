@@ -12,41 +12,49 @@ namespace DemoAspNetApp.Services
     {
         private readonly UserManager<ApplicationUser> userManager;
         private readonly SignInManager<ApplicationUser> signInManager;
+        private readonly RoleManager<IdentityRole> roleManager;
         private readonly IConfiguration configuration;
 
         public AccountRepository(
             UserManager<ApplicationUser> userManager,
             SignInManager<ApplicationUser> signInManager,
+            RoleManager<IdentityRole> roleManager,
             IConfiguration configuration
             )
         {
             this.userManager = userManager;
             this.signInManager = signInManager;
+            this.roleManager = roleManager;
             this.configuration = configuration;
         }
 
         public BinaryReader JwtRegisteredClaimName { get; private set; }
 
-        public async Task<string> SignInAsync(SignInModel model)
+        public async Task<SignInResponse> SignInAsync(SignInModel model)
         {
             var result = await signInManager.PasswordSignInAsync
                 (model.Email, model.Password, false, false);
             if (!result.Succeeded)
             {
-                return string.Empty;
+                return null; //Can not sign in
             }
 
+            var userLogin = await userManager.FindByEmailAsync(model.Email);
+            var userRoles = await userManager.GetRolesAsync(userLogin);
+            var roleClaims = userRoles.Select(role => new Claim(ClaimTypes.Role, role));
+            
             var authClaims = new List<Claim>
             {
                 new Claim(ClaimTypes.Email, model.Email),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             };
+            authClaims.AddRange(roleClaims);
 
             var authenKey = new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(configuration["JWT:Secret"])
                 );
 
-            var token = new JwtSecurityToken(
+            var tokenInfo = new JwtSecurityToken(
                 issuer: configuration["JWT:ValidIssuer"],
                 audience: configuration["JWT:ValidAudience"],
                 expires: DateTime.Now.AddMinutes(20),
@@ -57,8 +65,44 @@ namespace DemoAspNetApp.Services
                     )
                 );
 
-            return new JwtSecurityTokenHandler().WriteToken(token);
+            var jwtTokenHash = new JwtSecurityTokenHandler().WriteToken(tokenInfo);
+
+            var response = new SignInResponse
+            {
+                JwtToken = jwtTokenHash,
+                User = new UserVM
+                {
+                    Id = userLogin.Id,
+                    Email = userLogin.Email,
+                    FirstName = userLogin.FirstName,
+                    LastName = userLogin.LastName,
+                    UserName = userLogin.UserName,
+                    Roles = await GetRolesUser(userLogin.UserName),
+                }
+            };
+
+            return response;
         }
+
+        public async Task<List<RoleVM>> GetRolesUser(string username)
+        {
+            var user = await userManager.FindByEmailAsync(username);
+            if (user != null)
+            {
+                var roles = await userManager.GetRolesAsync(user);
+
+                var roleVMs = roles.Select(roleName => new RoleVM
+                {
+                    RoleId = roleManager.Roles.First(r => r.Name == roleName).Id,
+                    RoleName = roleName
+                }).ToList();
+
+                return roleVMs;
+            }
+
+            return new List<RoleVM>();
+        }
+
 
         public async Task<IdentityResult> SignUpAsync(SignUpModel model)
         {
@@ -70,7 +114,11 @@ namespace DemoAspNetApp.Services
                 UserName = model.Email,
             };
 
-            return await userManager.CreateAsync(user, model.Password); //Fw luu vao asp net users
+            var result = await userManager.CreateAsync(user, model.Password);//Fw luu vao asp net users
+
+            await userManager.AddToRoleAsync(user, "Member");
+
+            return result; 
         }
     }
 }

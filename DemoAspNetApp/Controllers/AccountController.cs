@@ -24,7 +24,7 @@ namespace DemoAspNetApp.Controllers
             var result = await accountRepository.SignUpAsync(signUpModel);
             if (result.Succeeded)
             {
-                return Ok(result.Succeeded);
+                return Ok("Create account success for user: " + signUpModel.Email);
             }
 
             return Unauthorized("Can not sign up");
@@ -34,9 +34,9 @@ namespace DemoAspNetApp.Controllers
         public async Task<IActionResult> SignIn(SignInModel signInModel)
         {
             var result = await accountRepository.SignInAsync(signInModel);
-            if (string.IsNullOrEmpty(result))
+            if (result == null)
             {
-                return Unauthorized("Can not sign in");
+                return Unauthorized("Can not sign in, email or password maybe incorrect");
             }
 
             return Ok(result);

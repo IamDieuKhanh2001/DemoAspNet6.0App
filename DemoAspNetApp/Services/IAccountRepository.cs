@@ -6,6 +6,6 @@ namespace DemoAspNetApp.Services
     public interface IAccountRepository
     {
         public Task<IdentityResult> SignUpAsync(SignUpModel model);
-        public Task<string> SignInAsync(SignInModel model);
+        public Task<SignInResponse> SignInAsync(SignInModel model);
     }
 }
