@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -58,6 +59,7 @@ builder.Services.AddAuthentication(options =>
     options.TokenValidationParameters = new
     Microsoft.IdentityModel.Tokens.TokenValidationParameters
     {
+        ClockSkew = TimeSpan.Zero,
         ValidateIssuer = true,
         ValidateAudience = true,
         ValidAudience = builder.Configuration["JWT:ValidAudience"], //Map from appsettings.json
@@ -65,6 +67,31 @@ builder.Services.AddAuthentication(options =>
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes
             (builder.Configuration["JWT:Secret"])) //Map from appsettings.json
     };
+    options.Events = new JwtBearerEvents
+    {
+        OnChallenge = context =>
+        {
+            context.HandleResponse(); // Ngăn chặn xử lý mặc định
+            context.Response.StatusCode = 401;
+            context.Response.ContentType = "application/json";
+
+            var result = JsonSerializer.Serialize(new { status = 401, message = "Unauthorized" });
+            return context.Response.WriteAsync(result);
+        }
+    };
+});
+
+//Configure CORS lisence
+var corsPolicy = "CustomCorsPolicy";
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("CustomCorsPolicy", builder =>
+    {
+        builder.WithOrigins("http://localhost:3000") // Chỉnh sửa tên miền của trang web của bạn
+               .AllowAnyMethod()
+               .AllowAnyHeader()
+               .AllowCredentials(); // Nếu bạn cần sử dụng định danh và cookie trên các yêu cầu CORS
+    });
 });
 
 var app = builder.Build();
@@ -76,6 +103,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseCors(corsPolicy); // Enable cors
+
 app.UseHttpsRedirection();
 
 app.UseAuthentication(); // middleware check author with jwt
@@ -84,9 +113,9 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-//Create Roles
 
-using(var scope = app.Services.CreateScope())
+//Create default Roles if not exists
+using (var scope = app.Services.CreateScope())
 {
     var roleManager = scope.ServiceProvider
         .GetRequiredService<RoleManager<IdentityRole>>();
@@ -101,6 +130,7 @@ using(var scope = app.Services.CreateScope())
     }
 }
 
+//Create default Administration account if not exists
 using (var scope = app.Services.CreateScope())
 {
     var userManager = scope.ServiceProvider

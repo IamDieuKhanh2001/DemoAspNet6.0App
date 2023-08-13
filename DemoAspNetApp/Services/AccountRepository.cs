@@ -1,4 +1,5 @@
 ﻿using DemoAspNetApp.Data;
+using DemoAspNetApp.Helpers;
 using DemoAspNetApp.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
@@ -14,63 +15,114 @@ namespace DemoAspNetApp.Services
         private readonly SignInManager<ApplicationUser> signInManager;
         private readonly RoleManager<IdentityRole> roleManager;
         private readonly IConfiguration configuration;
+        private readonly DatabaseContext _context;
 
         public AccountRepository(
             UserManager<ApplicationUser> userManager,
             SignInManager<ApplicationUser> signInManager,
             RoleManager<IdentityRole> roleManager,
-            IConfiguration configuration
+            IConfiguration configuration,
+            DatabaseContext databaseContext
             )
         {
             this.userManager = userManager;
             this.signInManager = signInManager;
             this.roleManager = roleManager;
             this.configuration = configuration;
+            this._context = databaseContext;
         }
 
         public BinaryReader JwtRegisteredClaimName { get; private set; }
 
+        public async Task<TokenModel> GenerateToken(ApplicationUser user)
+        {
+            try
+            {
+                var userRoles = await userManager.GetRolesAsync(user);
+                var roleClaims = userRoles.Select(role => new Claim(ClaimTypes.Role, role)); //Convert Roles to claims
+
+                #region Create JWT 
+
+                #region Add Claims
+                string jwtId = Guid.NewGuid().ToString();
+                var authClaims = new List<Claim>
+            {
+                new Claim(ClaimTypes.Email, user.Email),
+                new Claim(JwtRegisteredClaimNames.Jti, jwtId),
+                new Claim("UserID", user.Id)
+            };
+                authClaims.AddRange(roleClaims);
+                #endregion
+
+                var authenKey = new SymmetricSecurityKey(
+                    Encoding.UTF8.GetBytes(configuration["JWT:Secret"])
+                    );
+
+                var tokenInfo = new JwtSecurityToken(
+                    issuer: configuration["JWT:ValidIssuer"],
+                    audience: configuration["JWT:ValidAudience"],
+                    expires: DateTime.UtcNow.AddMinutes(1),
+                    claims: authClaims,
+                    signingCredentials: new SigningCredentials(
+                        authenKey,
+                        SecurityAlgorithms.HmacSha512Signature
+                        )
+                    );
+
+                #endregion
+                var jwtTokenHash = new JwtSecurityTokenHandler().WriteToken(tokenInfo);
+                string refreshTokenHash = RefreshTokenGenerator.Generate();
+
+                //Stored RefreshToken and jwt in db
+                var accountTokenEntity = new AccountToken
+                {
+                    Id = Guid.NewGuid(),
+                    User = user,
+                    JwtId = jwtId,
+                    RefreshToken = refreshTokenHash,
+                    IsUsed = false,
+                    IsRevoked = false,
+                    IssueAt = DateTime.UtcNow,
+                    ExpiredAt = DateTime.UtcNow.AddSeconds(2),
+                };
+
+                await _context.AddAsync(accountTokenEntity);
+                await _context.SaveChangesAsync();
+
+                return new TokenModel
+                {
+                    JwtToken = jwtTokenHash,
+                    RefreshToken = refreshTokenHash
+                };
+            }
+            catch
+            {
+                return null;
+            }
+        }
         public async Task<SignInResponse> SignInAsync(SignInModel model)
         {
+            #region authentication check
             var result = await signInManager.PasswordSignInAsync
                 (model.Email, model.Password, false, false);
             if (!result.Succeeded)
             {
                 return null; //Can not sign in
             }
+            #endregion
 
             var userLogin = await userManager.FindByEmailAsync(model.Email);
-            var userRoles = await userManager.GetRolesAsync(userLogin);
-            var roleClaims = userRoles.Select(role => new Claim(ClaimTypes.Role, role));
-            
-            var authClaims = new List<Claim>
+            var token = await GenerateToken(userLogin);
+            if (token == null)
             {
-                new Claim(ClaimTypes.Email, model.Email),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            };
-            authClaims.AddRange(roleClaims);
-
-            var authenKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(configuration["JWT:Secret"])
-                );
-
-            var tokenInfo = new JwtSecurityToken(
-                issuer: configuration["JWT:ValidIssuer"],
-                audience: configuration["JWT:ValidAudience"],
-                expires: DateTime.Now.AddMinutes(20),
-                claims: authClaims,
-                signingCredentials: new SigningCredentials(
-                    authenKey,
-                    SecurityAlgorithms.HmacSha512Signature
-                    )
-                );
-
-            var jwtTokenHash = new JwtSecurityTokenHandler().WriteToken(tokenInfo);
-
+                return null; //Can not sign in
+            }
+            //Response
             var response = new SignInResponse
             {
-                JwtToken = jwtTokenHash,
-                User = new UserVM
+                JwtToken = token.JwtToken,
+                RefreshToken = token.RefreshToken,
+                UserInfo = new UserVM
                 {
                     Id = userLogin.Id,
                     Email = userLogin.Email,
@@ -116,9 +168,10 @@ namespace DemoAspNetApp.Services
 
             var result = await userManager.CreateAsync(user, model.Password);//Fw luu vao asp net users
 
-            await userManager.AddToRoleAsync(user, "Member");
+            await userManager.AddToRoleAsync(user, "Member");//Fw luu vao asp net users roles
 
             return result; 
         }
+
     }
 }

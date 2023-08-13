@@ -51,7 +51,7 @@ namespace DemoAspNetApp.Controllers
         }
 
         [HttpPost]
-        [Authorize]
+        [Authorize(Roles = "Admin")]
         public IActionResult CreateNew(LoaiModel loaiModel)
         {
             try

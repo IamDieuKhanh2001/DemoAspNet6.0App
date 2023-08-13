@@ -12,6 +12,7 @@ namespace DemoAspNetApp.Data
         }
 
         #region Db set 
+        public DbSet<AccountToken> AccountTokens { get; set; }
         public DbSet<HangHoa> HangHoas { get; set; }
         public DbSet<Loai> Loais { get; set; }
         public DbSet<DonHang> DonHangs { get; set; }

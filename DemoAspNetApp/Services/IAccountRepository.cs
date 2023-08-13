@@ -1,4 +1,5 @@
-﻿using DemoAspNetApp.Models;
+﻿using DemoAspNetApp.Data;
+using DemoAspNetApp.Models;
 using Microsoft.AspNetCore.Identity;
 
 namespace DemoAspNetApp.Services
@@ -7,5 +8,7 @@ namespace DemoAspNetApp.Services
     {
         public Task<IdentityResult> SignUpAsync(SignUpModel model);
         public Task<SignInResponse> SignInAsync(SignInModel model);
+        public Task<TokenModel> GenerateToken(ApplicationUser user);
+
     }
 }
